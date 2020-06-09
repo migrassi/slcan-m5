@@ -1,95 +1,211 @@
 #include <ESP32CAN.h>           // v1.0.0     from https://github.com/nhatuan84/arduino-esp32-can-demo
+#include <m5Stack.h>
 #include <CAN_config.h>         // as above
 #include <SPI.h>                // v1.0
 #include <Wire.h>               // v1.0
-#include <Adafruit_GFX.h>       // v1.2.7     from https://github.com/adafruit/Adafruit-GFX-Library
-#include <Adafruit_SSD1306.h>   // v1.1.2     from https://github.com/adafruit/Adafruit_SSD1306
 #include "BluetoothSerial.h"    // v1.0
 
+#define LOVYANLAUNCHER 1
+
+#if LOVYANLAUNCHER == 1
+#include "m5StackUpdater.h"
+#endif
+#define LOAD_GFXFF
+#define GFXFF 1
+#define GLCD  0
+#define FONT2 2
+#define FONT4 4
+#define FONT6 6
+#define FONT7 7
+#define FONT8 8
+#define FSS9 &FreeSans9pt7b
+#define FSSB9 &FreeSansBold9pt7b
+#define FSSB12 &FreeSansBold12pt7b
+#define FSS12 &FreeSans12pt7b
+#define FSS18 &FreeSans18pt7b
+#define FSS24 &FreeSans24pt7b
+#define FSSB24 &FreeSansBold24pt7b
+
+#include "battery12pt7b.h"
+#define BAT12 &battery12pt7b 
+
 // CURRENTLY ESP32 Dev Module Board Definition
-// PIN 4  CANTX to WAVESHARE CAN transceiver
-// PIN 5  CANRX to WAVESHARE CAN transceiver
-// PIN 12 BLUETOOTH SWITCH outer pin
-// PIN 14 USED FOR SWITCH outer pin TO SHOW MSG COUNTER
+// PIN 4  CANTX 
+// PIN 5  CANRX 
+// PIN 12 BLUETOOTH SWITCH
+// PIN 14 NOT IN USE
 // PIN 15 10k to ground to remove boot messages
-// PIN 21 SDA (4.7k to 5v) for SSD1306
-// PIN 22 SCL (4.7k to 5v) for SSD1306
-// 3.3v to SSD1306 & WAVESHARE CAN transceiver
-// GND to SWITCH CENTER, SSD1306 & WAVESHARE CAN transceiver
+// 3.3v 
+// GND to SWITCH CENTER
 
 CAN_device_t              CAN_cfg;
-Adafruit_SSD1306          display(-1);
 BluetoothSerial           SerialBT;
 
 boolean working           = false;
+boolean working_bak       = false;
 boolean bluetooth         = false;
+boolean bluetooth_bak     = false;
 boolean timestamp         = false;
+boolean timestamp_bak     = false;
 boolean cr                = false;
 boolean disp_cnt          = false;
-int can_speed             = 500;
-int ser_speed             = 500000;
+int can_speed             = 250;
+int ser_speed             = 921600;
 int msg_cnt_in            = 0;
 int msg_cnt_out           = 0;
-
+unsigned long bakMillis   = 0;
 const int SWITCH_PIN_A    = 12;
-const int SWITCH_PIN_B    = 14;
+//const int SWITCH_PIN_B  = 14;
+
+uint16_t textColor = TFT_WHITE;
+uint16_t lightBackground = 0x101D;//0x1E9F;
+uint16_t darkBackground = 0x0811;//0x439;
+int LCD_Brightness = 10;
+int LCD_Dif = -10;
+int counter = 0;
+boolean firstTime = true;
+int bat_bak = 10;
+int bat = 0;
+char speed_bak[25];
 
 static uint8_t hexval[17] = "0123456789ABCDEF";
 
 //----------------------------------------------------------------
 
-void print_error(int canspeed) {
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setCursor(0,0);
-  display.setTextColor(BLACK, WHITE);
-  display.print("mintynet.com slcan");
-  if (bluetooth) display.println(" B");
-  else display.println();
-  display.setTextColor(WHITE, BLACK);
-  if (canspeed > 0) {
-    display.println(" NOT AVAILABLE");
-    display.print("  ser: ");
-    display.print(ser_speed/1000);
-    display.print("kbps");
-    if (timestamp) { display.println("    T"); } else { display.println(""); }
-    display.print("  can: ");
-    display.print(canspeed);
-    display.print("kbps");
-    if (working) { display.println("   ON"); } else { display.println("   OFF"); }
-  } else if (canspeed == -1) {
-    display.println();
-    display.println("  STOP FIRST");  
-  } else {
-    display.println();
-    display.println("  CANNOT SEND");
+void disp_msg_cnt() {
+  char buffer[20];
+  int xpos = 200;
+  int txtLeft = 20;
+  int txtRight =  m5.Lcd.width() - 2;
+  int ylines1 = 70;
+  int ylines2 = 110;
+  int ylines3 = 145;
+  int ylines4 = 170;
+  int ylines5 = 195;
+	
+  if (LCD_Brightness != 0) {
+    m5.Lcd.setTextColor(textColor, darkBackground);
+    if (firstTime) {
+      firstTime = false;
+      m5.Lcd.setTextDatum(L_BASELINE);
+      m5.Lcd.setFreeFont(FSS12);
+      m5.Lcd.drawString("count in",txtLeft, ylines1,GFXFF);  
+      m5.Lcd.drawString("count out",txtLeft, ylines2,GFXFF); 
+      m5.Lcd.setFreeFont(FSS12);
+      m5.Lcd.drawString("slcan",txtLeft, ylines3,GFXFF); 
+      m5.Lcd.drawString("bluetooth",txtLeft, ylines4,GFXFF); 
+      m5.Lcd.drawString("timestamp",txtLeft, ylines5,GFXFF); 
+      m5.Lcd.setTextDatum(R_BASELINE);
+      m5.Lcd.drawString("packets/s",txtRight, ylines1,GFXFF);  
+      m5.Lcd.drawString("packets/s",txtRight, ylines2,GFXFF);      
+    }
+    m5.Lcd.setFreeFont(FSS18);
+	  m5.Lcd.setTextDatum(R_BASELINE);
+
+    sprintf(buffer, "%*d", 4, msg_cnt_in);
+    m5.Lcd.drawString(buffer, xpos, ylines1,GFXFF);
+    sprintf(buffer, "%*d", 4, msg_cnt_out);
+    m5.Lcd.drawString(buffer, xpos, ylines2,GFXFF);
+    m5.Lcd.setFreeFont(FSS12);
+    if (working_bak != working) {
+      if (working) { m5.Lcd.drawString("  ON",xpos, ylines3,GFXFF); } 
+      else { m5.Lcd.drawString("OFF",xpos, ylines3,GFXFF); }
+      working_bak = working;
+    }
+    if (bluetooth_bak != bluetooth) {
+      if (bluetooth) { m5.Lcd.drawString("  ON",xpos, ylines4,GFXFF); } 
+      else { m5.Lcd.drawString("OFF",xpos, ylines4,GFXFF); }
+      bluetooth_bak = bluetooth;
+    }
+    if (timestamp_bak != timestamp) {
+      if (timestamp) { m5.Lcd.drawString("  ON",xpos, ylines5,GFXFF); } 
+      else { m5.Lcd.drawString("OFF",xpos, ylines5,GFXFF); }
+      timestamp_bak = timestamp;
+    }
   }
-  display.display();
-  delay(2500);
-} //print_error()
+} //disp-msg-cnt()
 
 //----------------------------------------------------------------
 
-void print_status() {
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setCursor(0,0);
-  display.setTextColor(BLACK, WHITE);
-  display.setCursor(0,0);
-  display.print("mintynet.com slcan");
-  if (bluetooth) display.println(" B");
-  else display.println();
-  display.setTextColor(WHITE, BLACK);
-  display.print("  ser: ");
-  display.print(ser_speed/1000);
-  display.print("kbps");
-  if (timestamp) { display.println("    T"); } else { display.println(""); }
-  display.print("  can: ");
-  display.print(can_speed);
-  display.print("kbps");
-  if (working) { display.println("   ON"); } else { display.println("   OFF"); }
-  display.display();
-} //print_status()
+void display_settings() {
+  char buffer[25];
+
+  int txtLeft = 2;
+  int yHeadLine = 20;
+  int txtRightBat =  m5.Lcd.width() - 6;
+
+  sprintf(buffer, "ser:%i can:%i kbps", ser_speed/1000, can_speed);
+  if (strcmp(speed_bak, buffer) != 0) {
+    m5.Lcd.setTextSize(1);
+    m5.Lcd.setTextColor(textColor, lightBackground);
+    m5.Lcd.setTextDatum(L_BASELINE);
+	  m5.Lcd.setFreeFont(FSS12);
+	  m5.Lcd.drawString(buffer,txtLeft, yHeadLine,GFXFF);
+	strncpy(speed_bak, buffer, 25);
+  }
+
+  bat = m5.Power.getBatteryLevel();
+  if (bat_bak != bat) {
+	bat_bak = bat;
+	if (bat < 30)  { m5.Lcd.setTextColor(TFT_RED, lightBackground);}
+	byte bBat = - bat/25 + 69;  //E = 69 leer A = 65 voll
+	m5.Lcd.setTextDatum(R_BASELINE);
+	m5.Lcd.setFreeFont(BAT12);
+	buffer[0]=(char)bBat;
+	buffer[1]=0x00;
+	Serial.println(buffer);
+	m5.Lcd.drawString(buffer,txtRightBat, yHeadLine,GFXFF);
+  }
+} //diplay_settings()
+
+//----------------------------------------------------------------
+
+void display_error(int canspeed) {
+  char buffer[12];
+
+  int txtLeft = 2;
+  int yFootLine = 20;
+
+  m5.Lcd.fillRect(0, 210, 320, 30, lightBackground);                    /* Lower dark blue area */
+  m5.Lcd.drawFastHLine(0, 29, 320, TFT_WHITE);
+  m5.Lcd.drawFastHLine(0, 210, 320, TFT_WHITE);
+
+  m5.Lcd.setTextSize(1);
+  m5.Lcd.setTextColor(TFT_RED, lightBackground);
+
+  m5.Lcd.setFreeFont(FSSB12);
+  m5.Lcd.drawString(buffer,txtLeft, yFootLine,GFXFF);
+	
+  //if (bluetooth) m5.Lcd.println(" B");
+  //else m5.Lcd.println();
+  m5.Lcd.setTextColor(WHITE, BLACK);
+  if (canspeed > 0) {
+    m5.Lcd.drawString("can kbs NOT AVAILABLE",txtLeft, yFootLine,GFXFF);
+  } else if (canspeed == -1) {
+    m5.Lcd.drawString("STOP FIRST",txtLeft, yFootLine,GFXFF);
+  } else {
+    m5.Lcd.drawString("CANNOT SEND",txtLeft, yFootLine,GFXFF);
+  }
+  delay(2500);
+} //display_error()
+
+//----------------------------------------------------------------
+
+void display_main()
+{
+  m5.Lcd.setTextFont(1);
+  m5.Lcd.fillRect(0, 0, 320, 30, lightBackground);                      /* Upper dark blue area */
+  m5.Lcd.fillRect(0, 30, 320, 180, darkBackground);                   /* Main light blue area */
+  m5.Lcd.fillRect(0, 210, 320, 30, lightBackground);                    /* Lower dark blue area */
+  m5.Lcd.drawFastHLine(0, 29, 320, TFT_WHITE);
+  m5.Lcd.drawFastHLine(0, 210, 320, TFT_WHITE);
+  firstTime = true;
+  bat_bak = 30;
+  speed_bak[0] = 0x00;
+  working_bak = !working;
+  bluetooth_bak = !bluetooth;
+  timestamp_bak = !timestamp;
+} //display_main()
 
 //----------------------------------------------------------------
 
@@ -117,13 +233,13 @@ void pars_slcancmd(char *buf)
       ESP32Can.CANInit();
       msg_cnt_in = 0;
       msg_cnt_out = 0;
-      print_status();
+      display_settings();
       slcan_ack();
       break;
     case 'C':               // CLOSE CAN
       working=false;
       ESP32Can.CANStop();
-      print_status();
+      display_settings();
       slcan_ack();
       break;
     case 't':               // SEND STD FRAME
@@ -146,12 +262,12 @@ void pars_slcancmd(char *buf)
       switch (buf[1]) {
         case '0':           // TIMESTAMP OFF  
           timestamp = false;
-          print_status();
+          display_settings();
           slcan_ack();
           break;
         case '1':           // TIMESTAMP ON
           timestamp = true;
-          print_status();
+          display_settings();
           slcan_ack();
           break;
         default:
@@ -169,60 +285,60 @@ void pars_slcancmd(char *buf)
       break;
     case 'S':               // CAN bit-rate
       if (working) {
-        print_error(-1);
-        print_status();
+        display_error(-1);
+        display_settings();
         break;
       }
       switch (buf[1]) {
         case '0':           // 10k  
-          print_error(10);
-          print_status();
+          display_error(10);
+          display_settings();
           slcan_nack();
           break;
         case '1':           // 20k
-          print_error(20);
-          print_status();
+          display_error(20);
+          display_settings();
           slcan_nack();
           break;
         case '2':           // 50k
-          print_error(50);
-          print_status();
+          display_error(50);
+          display_settings();
           slcan_nack();
           break;
         case '3':           // 100k
           CAN_cfg.speed=CAN_SPEED_100KBPS;
           can_speed = 100;
-          print_status();
+          display_settings();
           slcan_ack();
           break;
         case '4':           // 125k
           CAN_cfg.speed=CAN_SPEED_125KBPS;
           can_speed = 125;
-          print_status();
+          display_settings();
           slcan_ack();
           break;
         case '5':           // 250k
           CAN_cfg.speed=CAN_SPEED_250KBPS;
           can_speed = 250;
-          print_status();
+          display_settings();
          slcan_ack();
           break;
         case '6':           // 500k
           CAN_cfg.speed=CAN_SPEED_500KBPS;
           can_speed = 500;
-          print_status();
+          display_settings();
           slcan_ack();
           break;
         case '7': // 800k
           CAN_cfg.speed=CAN_SPEED_800KBPS;
           can_speed = 800;
-          print_status();
+          display_settings();
           slcan_ack();
           break;
         case '8':           // 1000k
           CAN_cfg.speed=CAN_SPEED_1000KBPS;
           can_speed = 1000;
-          print_status();
+          display_settings();
           slcan_ack();
           break;
         default:
@@ -429,8 +545,8 @@ void transfer_can2tty()
 
 void send_canmsg(char *buf, boolean rtr, boolean ext) {
   if (!working) {
-    print_error(0);
-    print_status();
+    display_error(0);
+    display_settings();
   } else {
     CAN_frame_t tx_frame;
     int msg_id = 0;
@@ -483,52 +599,39 @@ void send_canmsg(char *buf, boolean rtr, boolean ext) {
 
 //----------------------------------------------------------------
 
-void disp_msg_cnt() {
-  boolean switchB = digitalRead(SWITCH_PIN_B);
-  if (!switchB) {
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setCursor(0,0);
-    display.setTextColor(BLACK, WHITE);
-    display.print("mintynet.com slcan");
-    if (bluetooth) display.println(" B");
-    else display.println();
-    display.setTextColor(WHITE, BLACK);
-    display.print("  cnt  in: ");
-    display.println(msg_cnt_in);
-    display.print("  cnt out: ");
-    display.println(msg_cnt_out);
-    display.display();
-    disp_cnt = true;
-  } else if (disp_cnt) {
-    print_status();
-    disp_cnt = false;
-  }
-} //disp-msg-cnt()
-
-//----------------------------------------------------------------
 
 void setup() {
+  delay(100);
+  m5.begin();
+  m5.Power.begin();
+  Wire.begin();
+#if LOVYANLAUNCHER == 1
+  if(digitalRead(BUTTON_A_PIN) == 0){
+    Serial.println("Will load menu binary");
+    updateFromFS(SD);
+    ESP.restart();
+  }
+#endif
   //Wire.begin(21,22);
   pinMode(SWITCH_PIN_A,INPUT_PULLUP);
-  pinMode(SWITCH_PIN_B,INPUT_PULLUP);
-  delay(3000);
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3C (for the 128x32)
-  display.setRotation(2);
-  Serial.begin(ser_speed);
-  delay(100);
-  //Serial.println("CAN demo");
-  CAN_cfg.speed=CAN_SPEED_500KBPS;
-  CAN_cfg.tx_pin_id = GPIO_NUM_4;
+  //pinMode(SWITCH_PIN_B,INPUT_PULLUP);
+  CAN_cfg.speed=CAN_SPEED_250KBPS;
+  CAN_cfg.tx_pin_id = GPIO_NUM_2;
   CAN_cfg.rx_pin_id = GPIO_NUM_5;
   CAN_cfg.rx_queue = xQueueCreate(10,sizeof(CAN_frame_t));
-  display.setTextSize(2);
-  display.setTextColor(WHITE);
-  display.setCursor(15,10);
-  display.clearDisplay();
-  display.println("mintynet");
-  display.display();
-  delay(2000);
+  m5.Lcd.setFreeFont(FSS12);
+  m5.Lcd.setTextDatum(TL_DATUM);
+  m5.Lcd.setTextSize(GFXFF);
+  m5.Lcd.setTextColor(WHITE);
+  m5.Lcd.setCursor(15,40);
+  m5.Lcd.clearDisplay();
+  m5.Lcd.println("slcan device");
+
+  ledcDetachPin(SPEAKER_PIN);
+  pinMode(SPEAKER_PIN, INPUT);
+
+  setCpuFrequencyMhz(80);
+  delay(300);
   boolean switchA = digitalRead(SWITCH_PIN_A);
   if (!switchA) {
     SerialBT.begin("SLCAN");
@@ -539,13 +642,37 @@ void setup() {
     Serial.println("BT Switch OFF");
   }
   if (bluetooth) Serial.println("BLUETOOTH ON");
-  print_status();
+  bakMillis = millis();
+  display_main();
+  display_settings();
+  delay(200);
+  Serial.flush();
+  Serial.updateBaudRate(ser_speed);  
+
+  delay(100);
 } // setup()
 
 //----------------------------------------------------------------
 
 void loop() {
+  m5.update();
   transfer_can2tty();
   transfer_tty2can();
-  disp_msg_cnt();
+  if ((millis() - bakMillis) > 1000) {
+    bakMillis = millis();
+    disp_msg_cnt();
+    msg_cnt_out = 0;
+    msg_cnt_in  = 0;
+  }
+  if (m5.BtnC.wasReleasefor(50) == true) {                    /* Button C pressed ? --> Change brightness */
+    //m5.Speaker.tone(1176, 1);
+    if (LCD_Brightness >= 250) { LCD_Dif = -10; } 
+    else if (LCD_Brightness <= 0) { LCD_Dif = 10; }
+
+    LCD_Brightness += LCD_Dif;                          /* Increase brightness */
+    m5.Lcd.setBrightness(LCD_Brightness);               /* Change brightness value */
+  } 
+  if (m5.BtnC.wasReleasefor(700) == true) {
+    LCD_Dif = - LCD_Dif;
+  }
 } // loop();
