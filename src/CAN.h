@@ -81,6 +81,7 @@ typedef struct {
  * \return 0 CAN Module had been initialized
  */
 int CAN_init(void);
+int CAN_init_lom(void);
 
 /**
  * \brief Send a can frame

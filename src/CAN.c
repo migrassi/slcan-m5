@@ -250,6 +250,105 @@ int CAN_stop(){
 
 	//enter reset mode
 	MODULE_CAN->MOD.B.RM = 1;
+    MODULE_CAN->MOD.B.LOM = 0;
 
-	return 0;
+    return 0;
+}
+
+int CAN_init_lom()
+{
+    //Time quantum
+	double __tq;
+
+    //enable module
+    DPORT_SET_PERI_REG_MASK(DPORT_PERIP_CLK_EN_REG, DPORT_CAN_CLK_EN);
+    DPORT_CLEAR_PERI_REG_MASK(DPORT_PERIP_RST_EN_REG, DPORT_CAN_RST);
+
+    //configure TX pin as input (that it can't do anything)
+    gpio_set_direction(CAN_cfg.tx_pin_id, GPIO_MODE_INPUT);
+    gpio_matrix_in(CAN_cfg.tx_pin_id, CAN_TX_IDX, 0);
+    gpio_pad_select_gpio(CAN_cfg.tx_pin_id);
+
+    //configure RX pin
+	gpio_set_direction(CAN_cfg.rx_pin_id,GPIO_MODE_INPUT);
+	gpio_matrix_in(CAN_cfg.rx_pin_id,CAN_RX_IDX,0);
+	gpio_pad_select_gpio(CAN_cfg.rx_pin_id);
+
+    //set to PELICAN mode
+    MODULE_CAN->CDR.B.COD = 0x4;
+    MODULE_CAN->CDR.B.COFF = 0x1;
+
+    MODULE_CAN->CDR.B.reserved_1 = 0x1;
+    MODULE_CAN->CDR.B.RXINTEN = 0x1;
+    MODULE_CAN->CDR.B.CBP = 0x1;
+    MODULE_CAN->CDR.B.CAN_M = 0x1;
+
+    //no acceptance filtering, as we want to fetch all messages
+    MODULE_CAN->MBX_CTRL.ACC.CODE[0] = 0;
+    MODULE_CAN->MBX_CTRL.ACC.CODE[1] = 0;
+    MODULE_CAN->MBX_CTRL.ACC.CODE[2] = 0;
+    MODULE_CAN->MBX_CTRL.ACC.CODE[3] = 0;
+    MODULE_CAN->MBX_CTRL.ACC.MASK[0] = 0xff;
+    MODULE_CAN->MBX_CTRL.ACC.MASK[1] = 0xff;
+    MODULE_CAN->MBX_CTRL.ACC.MASK[2] = 0xff;
+    MODULE_CAN->MBX_CTRL.ACC.MASK[3] = 0xff;
+
+    //synchronization jump width is the same for all baud rates
+	MODULE_CAN->BTR0.B.SJW		=0x1;
+
+	//TSEG2 is the same for all baud rates
+	MODULE_CAN->BTR1.B.TSEG2	=0x1;
+
+	//select time quantum and set TSEG1
+	switch(CAN_cfg.speed){
+		case CAN_SPEED_1000KBPS:
+			MODULE_CAN->BTR1.B.TSEG1	=0x4;
+			__tq = 0.125;
+			break;
+
+		case CAN_SPEED_800KBPS:
+			MODULE_CAN->BTR1.B.TSEG1	=0x6;
+			__tq = 0.125;
+			break;
+		default:
+			MODULE_CAN->BTR1.B.TSEG1	=0xc;
+			__tq = ((float)1000/CAN_cfg.speed) / 16;
+	}
+
+	//set baud rate prescaler
+	MODULE_CAN->BTR0.B.BRP=(uint8_t)round((((APB_CLK_FREQ * __tq) / 2) - 1)/1000000)-1;
+
+    /* Set sampling
+     * 1 -> triple; the bus is sampled three times; recommended for low/medium speed buses     (class A and B) where filtering spikes on the bus line is beneficial
+     * 0 -> single; the bus is sampled once; recommended for high speed buses (SAE class C)*/
+    MODULE_CAN->BTR1.B.SAM	=0x1;
+    //enable some interrupts
+    MODULE_CAN->IER.U = 0x05;
+							 
+    //set to listen mode
+    MODULE_CAN->OCR.B.OCTN0 = 0;    //brief OCR.3 Output Control Transistor N0
+    MODULE_CAN->OCR.B.OCPOL0 = 0;   //brief OCR.2 Output Control Polarity 0
+    MODULE_CAN->OCR.B.OCMODE = 0x1; //brief OCR[1:0] Output Control Mode, see #    0001
+										 
+    MODULE_CAN->OCR.B.OCTP1 = 0x1;  //brief OCR.7 Output Control Transistor P1
+    MODULE_CAN->OCR.B.OCTN1 = 0;    //brief OCR.6 Output Control Transistor N1
+    MODULE_CAN->OCR.B.OCPOL1 = 0x1; //brief OCR.5 Output Control Polarity 1
+    MODULE_CAN->OCR.B.OCTP0 = 0;    //brief OCR.4 Output Control Transistor P0     1010
+
+    //clear error counters
+    MODULE_CAN->TXERR.U = 0;
+    MODULE_CAN->RXERR.U = 0;
+    (void)MODULE_CAN->ECC;
+
+    //clear interrupt flags
+    (void)MODULE_CAN->IR.U;
+
+    //install CAN ISR
+    esp_intr_alloc(ETS_CAN_INTR_SOURCE, 0, CAN_isr, NULL, NULL);
+
+    //Showtime. Release Reset Mode.
+    MODULE_CAN->MOD.B.LOM = 0x1;
+    MODULE_CAN->MOD.B.RM = 0;
+
+    return 0;
 }

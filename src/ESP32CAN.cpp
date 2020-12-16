@@ -4,7 +4,11 @@ int ESP32CAN::CANInit()
 {
     return CAN_init();
 }
-int ESP32CAN::CANWriteFrame(const CAN_frame_t* p_frame)
+int ESP32CAN::CANInitLom()
+{
+    return CAN_init_lom();
+}
+int ESP32CAN::CANWriteFrame(const CAN_frame_t *p_frame)
 {
     return CAN_write_frame(p_frame);
 }

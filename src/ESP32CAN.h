@@ -6,9 +6,10 @@
 
 class ESP32CAN
 {
-    public: 
+    public:
         int CANInit();
-        int CANWriteFrame(const CAN_frame_t* p_frame);
+        int CANInitLom();
+        int CANWriteFrame(const CAN_frame_t *p_frame);
         int CANStop();
 };
 
