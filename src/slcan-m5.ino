@@ -1,5 +1,5 @@
 #include <ESP32CAN.h>           // v1.0.0     from https://github.com/nhatuan84/arduino-esp32-can-demo
-#include <m5Stack.h>
+#include <M5Stack.h>
 #include <CAN_config.h>         // as above
 #include <SPI.h>                // v1.0
 #include <Wire.h>               // v1.0
@@ -8,7 +8,7 @@
 #define LOVYANLAUNCHER 1
 
 #if LOVYANLAUNCHER == 1
-#include "m5StackUpdater.h"
+#include "M5StackUpdater.h"
 #endif
 #define LOAD_GFXFF
 #define GFXFF 1
